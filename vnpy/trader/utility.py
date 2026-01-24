@@ -485,6 +485,30 @@ class BarGenerator:
         return bar
 
 
+class TimerGenerator:
+    """
+    Generate timer event at fixed hour and minute.
+    """
+
+    def __init__(self, hour: int, minute: int, on_timer: Callable) -> None:
+        """Constructor"""
+        self.hour: int = hour
+        self.minute: int = minute
+        self.on_timer: Callable = on_timer
+
+        self.triggered: bool = False
+
+    def update_timer(self, dt: datetime) -> None:
+        """
+        Update heartbeat datetime into generator.
+        """
+        if dt.hour == self.hour and dt.minute == self.minute:
+            if not self.triggered:
+                self.on_timer(dt)
+                self.triggered = True
+        else:
+            self.triggered = False
+
 class ArrayManager:
     """
     For:
