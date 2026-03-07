@@ -132,6 +132,20 @@ class BaseDatabase(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_bar_overview_symbol(self, symbol: str, exchange: Exchange, interval: Interval) -> BarOverview | None:
+        """
+        Return bar data available for a specific symbol and exchange.
+        """
+        pass
+
+    @abstractmethod
+    def get_tick_overview_symbol(self, symbol: str, exchange: Exchange) -> TickOverview | None:
+        """
+        Return tick data available for a specific symbol and exchange.
+        """
+        pass
+
 
 database: BaseDatabase | None = None
 
