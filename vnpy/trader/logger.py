@@ -1,13 +1,12 @@
 import sys
 from datetime import datetime
+from logging import CRITICAL, DEBUG, ERROR, INFO, WARNING
 from pathlib import Path
-from logging import DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 from loguru import logger
 
 from vnpy.trader.setting import SETTINGS
 from vnpy.trader.utility import get_folder_path
-
 
 __all__ = [
     "DEBUG",
@@ -22,8 +21,8 @@ __all__ = [
 # Log format
 format: str = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> "
-    "| <level>{level}</level> "
-    "| <cyan>{extra[gateway_name]}</cyan> "
+    "| <level>{level: <6.6}</level> "
+    "| <cyan>{extra[gateway_name]: <12.12}</cyan> "
     "| <level>{message}</level>"
 )
 
