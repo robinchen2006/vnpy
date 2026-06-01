@@ -3,6 +3,7 @@
 
 # 加载模块
 import numpy as np
+import os
 
 from vnpy.alpha import Segment, AlphaDataset, AlphaModel, AlphaLab
 from vnpy.alpha.model.models.lgb_model import LgbModel
@@ -11,7 +12,11 @@ from vnpy.alpha.model.models.lgb_model import LgbModel
 name = "300_lgb"
 
 # 创建数据中心
-lab: AlphaLab = AlphaLab("./lab/csi300")
+current_folder = os.path.dirname(os.path.abspath(__file__))
+csi300_root = os.path.join(current_folder, f"./lab/csi300")
+
+lab: AlphaLab = AlphaLab(csi300_root)
+
 
 # 从文件缓存加载
 dataset: AlphaDataset = lab.load_dataset(name)

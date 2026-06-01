@@ -3,6 +3,7 @@
 
 # 加载模块
 import importlib
+import os
 from datetime import datetime
 
 from vnpy.trader.constant import Interval
@@ -20,7 +21,11 @@ end: str = "2023-12-31"
 interval: Interval = Interval.DAILY
 
 # 创建数据中心
-lab: AlphaLab = AlphaLab("./lab/csi300")
+current_folder = os.path.dirname(os.path.abspath(__file__))
+csi300_root = os.path.join(current_folder, f"./lab/csi300")
+
+lab: AlphaLab = AlphaLab(csi300_root)
+
 
 # 加载所有成分股代码
 component_symbols: list[str] = lab.load_component_symbols(index_symbol, start, end)

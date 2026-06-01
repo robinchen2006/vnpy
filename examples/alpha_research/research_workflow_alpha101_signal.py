@@ -2,6 +2,8 @@
 # 依赖：先执行 research_workflow_alpha101_feature.py 和 research_workflow_alpha101_train.py
 
 # 加载模块
+import os
+
 import numpy as np
 import polars as pl
 
@@ -11,7 +13,9 @@ from vnpy.alpha import Segment, AlphaDataset, AlphaModel, AlphaLab
 name = "300_lgb"
 
 # 创建数据中心
-lab: AlphaLab = AlphaLab("./lab/csi300")
+current_folder = os.path.dirname(os.path.abspath(__file__))
+csi300_root = os.path.join(current_folder, f"./lab/csi300")
+lab: AlphaLab = AlphaLab(csi300_root)    
 
 # 从文件缓存加载数据集
 dataset: AlphaDataset = lab.load_dataset(name)
@@ -32,7 +36,7 @@ df_t = df_t.with_columns(pl.Series(pre).alias("signal"))
 signal: pl.DataFrame = df_t["datetime", "vt_symbol", "signal"]
 
 # 检查信号绩效
-dataset.show_signal_performance(signal)
+# dataset.show_signal_performance(signal)
 
 # 保存信号数据（供后续策略回测使用）
 lab.save_signal(name, signal)
