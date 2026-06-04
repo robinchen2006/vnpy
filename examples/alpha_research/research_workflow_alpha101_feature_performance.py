@@ -1,8 +1,7 @@
 """Feature performance analysis script.
 
 Converted from research_workflow_alpha101_feature_performance.ipynb.
-Runs dataset.show_feature_performance, saves each figure as a JPG,
-and saves analysis tables to CSV.
+Refactored into reusable modules and supports batch analysis for all alpha factors.
 """
 
 from __future__ import annotations
@@ -12,6 +11,8 @@ import os
 import unittest.mock as mock
 import warnings
 from contextlib import redirect_stdout
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 import matplotlib
@@ -30,15 +31,45 @@ from vnpy.alpha import AlphaLab
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
-# -----------------------------------------------------------------------------
-def _save_figures_as_jpg(output_dir: str, file_prefix: str) -> list[str]:
+@dataclass(frozen=True)
+class AnalysisConfig:
+    """Runtime configuration for feature analysis."""
+
+    dataset_name: str = "300_lgb"
+    alpha_prefix: str = "alpha"
+
+
+class DatasetDataView:
+    """Cached dataset views to avoid repeating expensive filtering work."""
+
+    def __init__(self, dataset) -> None:
+        starts = [pd.Timestamp(period[0]) for period in dataset.data_periods.values()]
+        ends = [pd.Timestamp(period[1]) for period in dataset.data_periods.values()]
+
+        self.start = min(starts).to_pydatetime()
+        self.end = max(ends).to_pydatetime()
+
+        self.result_df: pl.DataFrame = dataset.result_df.filter(
+            (pl.col("datetime") >= pl.lit(self.start))
+            & (pl.col("datetime") <= pl.lit(self.end))
+        )
+        self.learn_df: pl.DataFrame = dataset.learn_df.filter(
+            (pl.col("datetime") >= pl.lit(self.start))
+            & (pl.col("datetime") <= pl.lit(self.end))
+        )
+        self.base_price_df: pl.DataFrame = self.result_df.select(
+            ["datetime", "vt_symbol", "close"]
+        )
+
+
+def _save_figures_as_jpg(output_dir: Path, file_prefix: str) -> list[Path]:
     """Save each open matplotlib figure as an individual JPG file."""
-    os.makedirs(output_dir, exist_ok=True)
-    paths: list[str] = []
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
     idx = 1
+
     for fig_num in plt.get_fignums():
         fig = plt.figure(fig_num)
-        # 跳过没有任何实际内容的空白 figure
         has_content = any(
             len(ax.lines) > 0
             or len(ax.collections) > 0
@@ -50,37 +81,27 @@ def _save_figures_as_jpg(output_dir: str, file_prefix: str) -> list[str]:
         )
         if not has_content:
             continue
-        path = os.path.join(output_dir, f"{file_prefix}_{idx:02d}.jpg")
+
+        path = output_dir / f"{file_prefix}_{idx:02d}.jpg"
         fig.savefig(path, dpi=200, bbox_inches="tight", format="jpg")
         paths.append(path)
         idx += 1
+
     return paths
 
 
-# -----------------------------------------------------------------------------
-def _build_clean_data(dataset, feature_name: str) -> pd.DataFrame:
+def _build_clean_data(view: DatasetDataView, feature_name: str) -> pd.DataFrame:
     """Build Alphalens clean_data with the same logic as show_feature_performance."""
-    starts = [pd.Timestamp(p[0]) for p in dataset.data_periods.values()]
-    ends = [pd.Timestamp(p[1]) for p in dataset.data_periods.values()]
-    start = min(starts).to_pydatetime()
-    end = max(ends).to_pydatetime()
-
-    result_df: pl.DataFrame = dataset.result_df.filter(
-        (pl.col("datetime") >= pl.lit(start)) & (pl.col("datetime") <= pl.lit(end))
-    )
-    learn_df: pl.DataFrame = dataset.learn_df.filter(
-        (pl.col("datetime") >= pl.lit(start)) & (pl.col("datetime") <= pl.lit(end))
-    )
     merged = (
-        result_df.select(["datetime", "vt_symbol", "close"])
-        .join(
-            learn_df.select(["datetime", "vt_symbol", feature_name]),
+        view.base_price_df.join(
+            view.learn_df.select(["datetime", "vt_symbol", feature_name]),
             on=["datetime", "vt_symbol"],
             how="inner",
         )
         .fill_nan(None)
         .drop_nulls()
     )
+
     feature_s = (
         merged.select(["datetime", "vt_symbol", feature_name])
         .to_pandas()
@@ -91,28 +112,29 @@ def _build_clean_data(dataset, feature_name: str) -> pd.DataFrame:
         .to_pandas()
         .pivot(index="datetime", columns="vt_symbol", values="close")
     )
+
     return get_clean_factor_and_forward_returns(feature_s, price_df, quantiles=10)
 
 
-# -----------------------------------------------------------------------------
 def _save_csv(
-    dataset, feature_name: str, output_dir: str, file_prefix: str
-) -> list[str]:
+    view: DatasetDataView,
+    feature_name: str,
+    output_dir: Path,
+    file_prefix: str,
+) -> list[Path]:
     """Save analysis tables shown in console output to CSV."""
-    os.makedirs(output_dir, exist_ok=True)
-    clean_data = _build_clean_data(dataset, feature_name)
-    paths: list[str] = []
+    output_dir.mkdir(parents=True, exist_ok=True)
+    clean_data = _build_clean_data(view, feature_name)
+    paths: list[Path] = []
 
-    # quantiles statistics (min, max, mean, std, count, count %)
     qs = clean_data.groupby("factor_quantile")["factor"].agg(
         ["min", "max", "mean", "std", "count"]
     )
     qs["count %"] = qs["count"] / qs["count"].sum() * 100.0
-    p = os.path.join(output_dir, f"{file_prefix}_quantiles_statistics.csv")
+    p = output_dir / f"{file_prefix}_quantiles_statistics.csv"
     qs.to_csv(p, encoding="utf-8-sig")
     paths.append(p)
 
-    # returns analysis (same logic as create_returns_tear_sheet)
     factor_returns = perf.factor_returns(clean_data, demeaned=True, group_adjust=False)
     mean_quant_ret, _ = perf.mean_return_by_quantile(
         clean_data,
@@ -155,6 +177,7 @@ def _save_csv(
         clean_data["factor_quantile"].min(),
         std_err=compstd_quant_daily,
     )
+
     returns_table = pd.DataFrame()
     returns_table = pd.concat([returns_table, alpha_beta])
     returns_table.loc["Mean Period Wise Return Top Quantile (bps)"] = (
@@ -166,11 +189,10 @@ def _save_csv(
     returns_table.loc["Mean Period Wise Spread (bps)"] = (
         mean_ret_spread_quant.mean() * 10000
     )
-    p = os.path.join(output_dir, f"{file_prefix}_returns_analysis.csv")
+    p = output_dir / f"{file_prefix}_returns_analysis.csv"
     returns_table.apply(lambda x: x.round(3)).to_csv(p, encoding="utf-8-sig")
     paths.append(p)
 
-    # information analysis (same logic as create_information_tear_sheet)
     ic = perf.factor_information_coefficient(clean_data, False)
     information_table = pd.DataFrame()
     information_table["IC Mean"] = ic.mean()
@@ -183,11 +205,10 @@ def _save_csv(
     information_table["p-value(IC)"] = pd.Series(ttest_result.pvalue, index=ic.columns)
     information_table["IC Skew"] = stats.skew(ic)
     information_table["IC Kurtosis"] = stats.kurtosis(ic)
-    p = os.path.join(output_dir, f"{file_prefix}_information_analysis.csv")
+    p = output_dir / f"{file_prefix}_information_analysis.csv"
     information_table.apply(lambda x: x.round(3)).T.to_csv(p, encoding="utf-8-sig")
     paths.append(p)
 
-    # turnover analysis (same logic as create_turnover_tear_sheet)
     input_periods = alphalens_utils.get_forward_returns_columns(
         clean_data.columns,
         require_exact_day_multiple=True,
@@ -195,14 +216,14 @@ def _save_csv(
     turnover_periods = alphalens_utils.timedelta_strings_to_integers(input_periods)
     quantile_factor = clean_data["factor_quantile"]
     quantile_turnover = {
-        p: pd.concat(
+        period: pd.concat(
             [
-                perf.quantile_turnover(quantile_factor, q, p)
-                for q in quantile_factor.sort_values().unique().tolist()
+                perf.quantile_turnover(quantile_factor, quantile, period)
+                for quantile in quantile_factor.sort_values().unique().tolist()
             ],
             axis=1,
         )
-        for p in turnover_periods
+        for period in turnover_periods
     }
     autocorrelation = pd.concat(
         [
@@ -211,69 +232,140 @@ def _save_csv(
         ],
         axis=1,
     )
+
     turnover_table = pd.DataFrame()
     for period in sorted(quantile_turnover.keys()):
-        for quantile, p_data in quantile_turnover[period].items():
+        for quantile, period_data in quantile_turnover[period].items():
             turnover_table.loc[
                 f"Quantile {quantile} Mean Turnover ",
                 f"{period}D",
-            ] = p_data.mean()
+            ] = period_data.mean()
 
     auto_corr = pd.DataFrame()
-    for period, p_data in autocorrelation.items():
+    for period, period_data in autocorrelation.items():
         auto_corr.loc[
             "Mean Factor Rank Autocorrelation",
             f"{period}D",
-        ] = p_data.mean()
+        ] = period_data.mean()
 
-    p = os.path.join(output_dir, f"{file_prefix}_turnover_analysis.csv")
+    p = output_dir / f"{file_prefix}_turnover_analysis.csv"
     turnover_table.apply(lambda x: x.round(3)).to_csv(p, encoding="utf-8-sig")
     paths.append(p)
-    p = os.path.join(output_dir, f"{file_prefix}_turnover_autocorrelation.csv")
+
+    p = output_dir / f"{file_prefix}_turnover_autocorrelation.csv"
     auto_corr.apply(lambda x: x.round(3)).to_csv(p, encoding="utf-8-sig")
     paths.append(p)
 
     return paths
 
 
-# -----------------------------------------------------------------------------
-def main() -> None:
-    name = "300_lgb"
-    feature_name = "alpha2"
+def _list_alpha_features(dataset, alpha_prefix: str = "alpha") -> list[str]:
+    """Collect all alpha factor names from learn_df columns."""
+    features = [
+        col
+        for col in dataset.learn_df.columns
+        if col.startswith(alpha_prefix) and col not in {"datetime", "vt_symbol"}
+    ]
+    return sorted(features)
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    csi300_root = os.path.join(current_dir, "lab", "csi300")
-    dataset = AlphaLab(csi300_root).load_dataset(name)
 
-    if dataset is None:
-        raise FileNotFoundError(f"Dataset '{name}' not found under {csi300_root}")
-    # Patch plt.show 为空操作，防止 show_feature_performance 内部调用
-    # plt.show() 时清空所有 figure
+def _save_initial_alpha_output(
+    view: DatasetDataView,
+    output_dir: Path,
+    feature_names: list[str],
+) -> Path:
+    """Save the earliest timestamp snapshot for all alpha factors."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    first_dt = view.learn_df.select(pl.col("datetime").min()).item()
+    initial_df = view.learn_df.filter(pl.col("datetime") == first_dt).select(
+        ["datetime", "vt_symbol", *feature_names]
+    )
 
+    output_path = output_dir / "all_alpha_initial_output.csv"
+    initial_df.to_pandas().to_csv(output_path, index=False, encoding="utf-8-sig")
+    return output_path
+
+
+def _run_single_feature(
+    dataset,
+    view: DatasetDataView,
+    feature_name: str,
+    report_root: Path,
+) -> tuple[list[Path], list[Path]]:
+    """Run figure and table output for one feature."""
+    output_dir = report_root / feature_name
+
+    plt.close("all")
     with mock.patch("matplotlib.pyplot.show"), mock.patch("matplotlib.pyplot.close"):
         buf = io.StringIO()
         with redirect_stdout(buf):
             dataset.show_feature_performance(feature_name)
-
     print(buf.getvalue(), end="")
 
-    output_dir = os.path.join(csi300_root, "reports", name, feature_name)
-    prefix = f"{feature_name}"
-
-    # figure 此时还存活，立即保存
-    jpg_files = _save_figures_as_jpg(output_dir, prefix)
-
-    # 手动清理
+    jpg_files = _save_figures_as_jpg(output_dir, feature_name)
     plt.close("all")
+    csv_files = _save_csv(view, feature_name, output_dir, feature_name)
+    return jpg_files, csv_files
 
-    csv_files = _save_csv(dataset, feature_name, output_dir, prefix)
 
-    print(f"\n图片已保存 ({len(jpg_files)} 张):")
-    for p in jpg_files:
-        print(f"  {p}")
-    print("CSV已保存:")
-    for p in csv_files:
-        print(f"  {p}")
+def main() -> None:
+    config = AnalysisConfig()
+
+    current_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+    csi300_root = current_dir / "lab" / "csi300"
+    dataset = AlphaLab(str(csi300_root)).load_dataset(config.dataset_name)
+
+    if dataset is None:
+        raise FileNotFoundError(
+            f"Dataset '{config.dataset_name}' not found under {csi300_root}"
+        )
+
+    view = DatasetDataView(dataset)
+    feature_names = _list_alpha_features(dataset, config.alpha_prefix)
+    if not feature_names:
+        raise ValueError(
+            f"No alpha features with prefix '{config.alpha_prefix}' were found"
+        )
+
+    report_root = csi300_root / "reports" / config.dataset_name
+    initial_output_path = _save_initial_alpha_output(view, report_root, feature_names)
+
+    print(f"共识别到 {len(feature_names)} 个alpha因子")
+    print(f"初始输出已保存: {initial_output_path}")
+
+    all_jpg_files: list[Path] = []
+    all_csv_files: list[Path] = []
+    failed_features: list[tuple[str, str]] = []
+
+    for idx, feature_name in enumerate(feature_names, start=1):
+        print(f"\n[{idx}/{len(feature_names)}] 开始分析 {feature_name}")
+        try:
+            jpg_files, csv_files = _run_single_feature(
+                dataset,
+                view,
+                feature_name,
+                report_root,
+            )
+            all_jpg_files.extend(jpg_files)
+            all_csv_files.extend(csv_files)
+            print(
+                f"[{idx}/{len(feature_names)}] 完成 {feature_name} "
+                f"(图片 {len(jpg_files)} 张, CSV {len(csv_files)} 个)"
+            )
+        except Exception as exc:  # noqa: BLE001
+            failed_features.append((feature_name, str(exc)))
+            print(f"[{idx}/{len(feature_names)}] 失败 {feature_name}: {exc}")
+
+    print("\n汇总:")
+    print(f"  Alpha因子总数: {len(feature_names)}")
+    print(f"  图片总数: {len(all_jpg_files)}")
+    print(f"  CSV总数: {len(all_csv_files)}")
+    print(f"  失败数: {len(failed_features)}")
+
+    if failed_features:
+        print("失败明细:")
+        for feature_name, err in failed_features:
+            print(f"  {feature_name}: {err}")
 
 
 if __name__ == "__main__":
