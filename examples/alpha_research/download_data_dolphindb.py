@@ -11,7 +11,7 @@ from vnpy.trader.constant import Exchange, Interval
 from vnpy.trader.database import DB_TZ
 
 # 设置下载参数
-task_name = "csi300_2"
+task_name = "csi300"
 index_symbol = "000300.SSE"
 xt_index_symbol = "000300.SH"
 
