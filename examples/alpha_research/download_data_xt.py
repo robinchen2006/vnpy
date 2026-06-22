@@ -1,16 +1,15 @@
 # 加载模块
-from datetime import datetime
 import os
+from datetime import datetime
 
 from tqdm import tqdm
 from xtquant import xtdata
 
+from vnpy.alpha import AlphaLab, logger
+from vnpy.trader.constant import Exchange, Interval
 from vnpy.trader.database import DB_TZ
 from vnpy.trader.datafeed import get_datafeed
-from vnpy.trader.constant import Exchange, Interval
 from vnpy.trader.object import HistoryRequest
-
-from vnpy.alpha import AlphaLab, logger
 
 # 设置下载参数
 task_name = "csi300"
@@ -26,20 +25,22 @@ intervals = [
 current_folder = os.path.dirname(os.path.abspath(__file__))
 task_path = os.path.join(current_folder, f"./lab/{task_name}")
 
-lab = AlphaLab(task_path)    # 指定数据文件夹
+lab = AlphaLab(task_path)  # 指定数据文件夹
 
 # 初始化数据服务（这里配置使用的迅投研）
 datafeed = get_datafeed()
 datafeed.init()
 
 # 下载历史成分股信息
-# xtdata.download_sector_data()
+xtdata.download_sector_data()
 
-# xtdata.download_history_data("", "stocklistchange", "", "")
+xtdata.download_history_data("", "stocklistchange", "", "")
 
 
 # 查询交易日历
-days = xtdata.get_trading_calendar(market="SZ", start_time=start_date, end_time=end_date)
+days = xtdata.get_trading_calendar(
+    market="SZ", start_time=start_date, end_time=end_date
+)
 
 # 轮询获取指数成本股
 index_components = {}
@@ -91,8 +92,8 @@ for vt_symbol in tqdm(task_symbols):
 for vt_symbol in component_symbols:
     lab.add_contract_setting(
         vt_symbol,
-        long_rate=5/10000,
-        short_rate=10/10000,
+        long_rate=5 / 10000,
+        short_rate=10 / 10000,
         size=1,
         pricetick=0.0001,
     )
