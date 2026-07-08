@@ -138,6 +138,9 @@ class Exchange(Enum):
     LOCAL = "LOCAL"         # For local generated data
     GLOBAL = "GLOBAL"       # For those exchanges not supported yet
 
+    # 自己增加的
+    BKZS = "BKZS"           # 迅投板块指数
+
 
 class Currency(Enum):
     """
