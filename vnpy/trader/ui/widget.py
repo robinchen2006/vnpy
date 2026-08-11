@@ -622,6 +622,8 @@ class ConnectDialog(QtWidgets.QDialog):
         self.filename: str = f"connect_{gateway_name.lower()}.json"
 
         self.widgets: dict[str, tuple[QtWidgets.QWidget, type]] = {}
+        self.field_rows: dict[str, tuple[QtWidgets.QWidget, QtWidgets.QWidget]] = {}
+        self.setting_conditions: dict[str, dict[str, Any]] = {}
 
         self.init_ui()
 
@@ -631,6 +633,10 @@ class ConnectDialog(QtWidgets.QDialog):
 
         # Default setting provides field name, field data type and field default value.
         default_setting: dict | None = self.main_engine.get_default_setting(self.gateway_name)
+
+        gateway = self.main_engine.get_gateway(self.gateway_name)
+        if gateway:
+            self.setting_conditions = gateway.get_setting_conditions()
 
         # Saved setting provides field data used last time.
         loaded_setting: dict = load_json(self.filename)
@@ -649,10 +655,15 @@ class ConnectDialog(QtWidgets.QDialog):
                     if field_name in loaded_setting:
                         saved_value = loaded_setting[field_name]
                         ix: int = combo.findText(saved_value)
-                        combo.setCurrentIndex(ix)
+                        if ix >= 0:
+                            combo.setCurrentIndex(ix)
 
-                    form.addRow(f"{field_name} <{field_type.__name__}>", combo)
+                    label: QtWidgets.QLabel = QtWidgets.QLabel(
+                        f"{field_name} <{field_type.__name__}>"
+                    )
+                    form.addRow(label, combo)
                     self.widgets[field_name] = (combo, field_type)
+                    self.field_rows[field_name] = (label, combo)
                 else:
                     line: QtWidgets.QLineEdit = QtWidgets.QLineEdit(str(field_value))
 
@@ -667,18 +678,53 @@ class ConnectDialog(QtWidgets.QDialog):
                         validator: QtGui.QIntValidator = QtGui.QIntValidator()
                         line.setValidator(validator)
 
-                    form.addRow(f"{field_name} <{field_type.__name__}>", line)
+                    label = QtWidgets.QLabel(f"{field_name} <{field_type.__name__}>")
+                    form.addRow(label, line)
                     self.widgets[field_name] = (line, field_type)
+                    self.field_rows[field_name] = (label, line)
+
+        dependency_fields = {
+            dependency
+            for conditions in self.setting_conditions.values()
+            for dependency in conditions
+        }
+        for field_name in dependency_fields:
+            widget_info = self.widgets.get(field_name)
+            if not widget_info:
+                continue
+
+            widget, field_type = widget_info
+            if field_type is list:
+                combo = cast(QtWidgets.QComboBox, widget)
+                combo.currentTextChanged.connect(self.update_field_visibility)
+            else:
+                line = cast(QtWidgets.QLineEdit, widget)
+                line.textChanged.connect(self.update_field_visibility)
 
         button: QtWidgets.QPushButton = QtWidgets.QPushButton(_("连接"))
         button.clicked.connect(self.connect_gateway)
         form.addRow(button)
 
         self.setLayout(form)
+        self.update_field_visibility()
 
     def connect_gateway(self) -> None:
         """
         Get setting value from line edits and connect the gateway.
+        """
+        setting: dict = self.get_setting()
+
+        save_json(self.filename, setting)
+
+        self.main_engine.connect(setting, self.gateway_name)
+        self.accept()
+
+    def get_setting(self) -> dict:
+        """
+        Collect typed values from all connection fields.
+
+        Hidden fields are included deliberately so switching a mode does not
+        discard values entered for the other mode.
         """
         setting: dict = {}
 
@@ -695,10 +741,43 @@ class ConnectDialog(QtWidgets.QDialog):
                     field_value = field_type()
             setting[field_name] = field_value
 
-        save_json(self.filename, setting)
+        return setting
 
-        self.main_engine.connect(setting, self.gateway_name)
-        self.accept()
+    def update_field_visibility(self, _value: str = "") -> None:
+        """
+        Apply gateway-declared conditional field visibility rules.
+        """
+        if not self.setting_conditions:
+            return
+
+        setting: dict = self.get_setting()
+        visibility_changed: bool = False
+        for field_name, conditions in self.setting_conditions.items():
+            row = self.field_rows.get(field_name)
+            if not row:
+                continue
+
+            visible = all(
+                self._condition_matches(setting.get(dependency), expected)
+                for dependency, expected in conditions.items()
+            )
+            label, widget = row
+            if label.isVisible() != visible or widget.isVisible() != visible:
+                visibility_changed = True
+            label.setVisible(visible)
+            widget.setVisible(visible)
+
+        if visibility_changed and self.isVisible():
+            self.adjustSize()
+
+    @staticmethod
+    def _condition_matches(value: Any, expected: Any) -> bool:
+        """
+        Check one visibility condition, allowing one or multiple values.
+        """
+        if isinstance(expected, (list, tuple, set, frozenset)):
+            return value in expected
+        return value == expected
 
 
 class TradingWidget(QtWidgets.QWidget):

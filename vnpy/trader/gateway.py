@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 from vnpy.event import Event, EventEngine
 from .event import (
@@ -74,6 +75,13 @@ class BaseGateway(ABC):
 
     # Fields required in setting dict for connect function.
     default_setting: dict[str, str | int | float | bool] = {}
+
+    # Optional field visibility rules for the connection dialog.
+    #
+    # The outer key is the field to show conditionally.  Each inner mapping
+    # contains a dependency field and the value (or values) that make the
+    # field visible, for example: {"QMT路径": {"交易类型": "实盘"}}.
+    setting_conditions: dict[str, dict[str, Any]] = {}
 
     # Exchanges supported in the gateway.
     exchanges: list[Exchange] = []
@@ -270,3 +278,12 @@ class BaseGateway(ABC):
         Return default setting dict.
         """
         return self.default_setting
+
+    def get_setting_conditions(self) -> dict[str, dict[str, Any]]:
+        """
+        Return conditional visibility rules for connection settings.
+
+        Gateways that do not define rules return an empty mapping and keep
+        the original connection dialog behavior.
+        """
+        return self.setting_conditions
