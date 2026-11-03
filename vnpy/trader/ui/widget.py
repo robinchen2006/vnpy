@@ -96,6 +96,17 @@ class BaseCell(QtWidgets.QTableWidgetItem):
         return result
 
 
+class PriceCell(BaseCell):
+    """Display prices with one to three decimal places."""
+
+    def set_content(self, content: float, data: Any) -> None:
+        """Format the displayed price while retaining the original data."""
+        text = f"{content:.3f}".rstrip("0")
+        if text.endswith("."):
+            text += "0"
+        super().set_content(text, data)
+
+
 class EnumCell(BaseCell):
     """
     Cell used for showing enum data.
@@ -541,7 +552,7 @@ class PositionMonitor(BaseMonitor):
         "volume": {"display": _("数量"), "cell": BaseCell, "update": True},
         "yd_volume": {"display": _("昨仓"), "cell": BaseCell, "update": True},
         "frozen": {"display": _("冻结"), "cell": BaseCell, "update": True},
-        "price": {"display": _("均价"), "cell": BaseCell, "update": True},
+        "price": {"display": _("均价"), "cell": PriceCell, "update": True},
         "pnl": {"display": _("盈亏"), "cell": PnlCell, "update": True},
         "gateway_name": {"display": _("接口"), "cell": BaseCell, "update": False},
     }
