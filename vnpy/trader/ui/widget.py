@@ -476,7 +476,7 @@ class TradeMonitor(BaseMonitor):
     """
 
     event_type: str = EVENT_TRADE
-    data_key: str = ""
+    data_key: str = "vt_tradeid"
     sorting: bool = True
 
     headers: dict = {
